@@ -21,40 +21,53 @@ validCard :: Card -> Bool
 validCard = flip S.member fullDeckSet
 
 validGameState :: GameState -> Bool
-validGameState s = matchingPlrs && matchingTeams && validHands && validDran && nonDupPlrs && nonDupHandPlrs && nonDupScores && nonDupHands where
+validGameState g = matchingPlrs && matchingTeams && validHands && validDran && nonDupPlrs && nonDupHandPlrs && nonDupScores && nonDupHands where
 
-  plrList1  = fst <$> gamePlrs   s
-  plrList2  = fst <$> gameHands  s
-  teamList1 = snd <$> gamePlrs   s
-  teamList2 = fst <$> gameScores s
-  cardList  = concat $ snd <$> gameHands s
+  plrList1  = fst <$> gamePlrs   g
+  plrList2  = fst <$> gameHands  g
+  teamList1 = snd <$> gamePlrs   g
+  teamList2 = fst <$> gameScores g
+  cardList  = concat $ snd <$> gameHands g
 
   matchingPlrs  = S.fromList plrList1  == S.fromList plrList2
   matchingTeams = S.fromList teamList1 == S.fromList teamList2
 
   validHands = all validCard cardList
-  validDran  = gameDran s `elem` plrList1
+  validDran  = gameDran g `elem` plrList1
 
   nonDupPlrs     = nonDup plrList1
   nonDupHandPlrs = nonDup plrList2
   nonDupScores   = nonDup teamList2
   nonDupHands    = nonDup cardList
 
-plrHand :: Plr -> GameState -> Maybe [Card]
-plrHand p = lookup p . gameHands
+plrHand :: Plr -> GameState -> [Card]
+plrHand p = fromMaybe [] . lookup p . gameHands
 
 plrTeam :: Plr -> GameState -> Maybe Team
 plrTeam p = lookup p . gamePlrs
 
 validMove :: GameState -> Move -> Bool
 validMove g m = goodCardSuit && goodCard && validCheckCard && moveeExists && goodMovee && moveeNonempty && goodMover where
-  moverHand = fromMaybe [] $ plrHand (mover m) g
+  moverHand = plrHand (mover m) g
   goodCardSuit = cardSuit (moveCard m) `elem` fmap cardSuit moverHand
   goodCard = not $ elem (moveCard m) moverHand
   validCheckCard = validCard $ moveCard m
   moveeExists = elem (movee m) $ fst <$> gamePlrs g
   goodMovee = plrTeam (movee m) g /= plrTeam (mover m) g
-  moveeNonempty = plrHand (movee m) g /= Just []
+  moveeNonempty = plrHand (movee m) g /= []
   goodMover = mover m == gameDran g
+
+-- property that must hold: if validGameState g and validMove g m, then validGameState (applyMove m g)
+applyMove :: Move -> GameState -> GameState
+applyMove m g = g { gameHands = newHands, gameDran = newDran } where
+  cardFound = elem (moveCard m) $ plrHand (movee m) g
+  newDran = (if cardFound then mover else movee) m
+  newHands = if cardFound then transferred else untransferred
+  untransferred = gameHands g
+  transferred   = f <$> gameHands g
+  f (p, h)
+    | p == mover m = (p, moveCard m : h)
+    | p == movee m = (p, filter (/= moveCard m) h)
+    | otherwise    = (p, h)
 
 main = return ()

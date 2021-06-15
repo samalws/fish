@@ -59,15 +59,19 @@ plrTeam :: Plr -> GameState -> Maybe Team
 plrTeam p = lookup p . gamePlrs
 
 validMove :: GameState -> Move -> Bool
-validMove g m = goodCardSuit && goodCard && validCheckCard && moveeExists && goodMovee && moveeNonempty && goodMover where
-  moverHand = plrHand (mover m) g
-  goodCardSuit = cardSuit (moveCard m) `elem` fmap cardSuit moverHand
-  goodCard = not $ elem (moveCard m) moverHand
-  validCheckCard = validCard $ moveCard m
-  moveeExists = elem (movee m) $ fst <$> gamePlrs g
-  goodMovee = plrTeam (movee m) g /= plrTeam (mover m) g
-  moveeNonempty = plrHand (movee m) g /= []
-  goodMover = mover m == gameDran g
+validMove g m = goodMover && goodCardSuit && goodCard && validCheckCard && moveeExists && moveeRightTeam && moveeNonempty where
+  card      = moveCard m
+  mvee      = movee    m
+  mver      = mover    m
+  moverHand = plrHand mver g
+
+  goodMover      = mver == gameDran g
+  goodCardSuit   = cardSuit card `elem` (cardSuit <$> moverHand)
+  goodCard       = not $ card `elem` moverHand
+  validCheckCard = validCard card
+  moveeExists    = mvee `elem` (fst <$> gamePlrs g)
+  moveeRightTeam = plrTeam mvee g /= plrTeam mver g
+  moveeNonempty  = plrHand mvee g /= []
 
 -- property that must hold: if validGameState g and validMove g m, then validGameState (applyMove m g)
 applyMove :: Move -> GameState -> GameState

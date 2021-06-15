@@ -5,15 +5,26 @@ import Data.List
 nonDup :: (Ord a) => [a] -> Bool
 nonDup l = length l == length (S.fromList l)
 
+allSame :: (Eq a) => [a] -> Bool
+allSame [] = True
+allSame (h:r) = all (== h) r
+
 -- ord derivations are so they can be put into sets
 data Card = Card { cardNum :: Int, cardSuit :: Int }              deriving (Show, Eq, Ord)
 data Plr  = Plr  { plrNum :: Int }                                deriving (Show, Eq, Ord)
 data Team = Team { teamNum :: Int }                               deriving (Show, Eq, Ord)
-data Move = Move { moveCard :: Card, mover :: Plr, movee :: Plr } deriving (Show, Eq, Ord)
+data Move = Move { moveCard :: Card, mover :: Plr, movee :: Plr } deriving (Show, Eq)
+data Call = Call { callCards :: [(Plr, Card)],  caller :: Plr } deriving (Show, Eq)
 data GameState = GameState { gamePlrs :: [(Plr, Team)], gameScores :: [(Team, Int)], gameHands :: [(Plr, [Card])], gameDran :: Plr } deriving (Eq, Show)
 
+numCardNums :: Int
+numCardNums = 6
+
+numCardSuits :: Int
+numCardSuits = 9
+
 fullDeck :: [Card]
-fullDeck = [Card num suit | num <- [1..6], suit <- [1..9]]
+fullDeck = [Card num suit | num <- [1..numCardNums], suit <- [1..numCardSuits]]
 
 fullDeckSet :: S.Set Card
 fullDeckSet = S.fromAscList fullDeck
@@ -61,12 +72,27 @@ validMove g m = goodCardSuit && goodCard && validCheckCard && moveeExists && goo
 -- property that must hold: if validGameState g and validMove g m, then validGameState (applyMove m g)
 applyMove :: Move -> GameState -> GameState
 applyMove m g = g { gameHands = newHands, gameDran = newDran } where
-  cardFound = elem (moveCard m) $ plrHand (movee m) g
+  cardFound = moveCard m `elem` plrHand (movee m) g
   newDran   = (if cardFound then mover else movee) m
   newHands  = (if cardFound then id else fmap f) $ gameHands g
   f (p, h)
     | p == mover m = (p, (:)    (moveCard m) h)
     | p == movee m = (p, delete (moveCard m) h)
     | otherwise    = (p, h)
+
+validCall :: GameState -> Call -> Bool
+validCall g c = goodCaller && goodPlrs && goodCards && rightNumCards && nonDupPlrs && nonDupCards where
+  clr   = caller c
+  crds  = callCards c
+  plrs  = fst <$> crds
+  cards = snd <$> crds
+
+  goodCaller    = clr `elem` (fst <$> gamePlrs g)
+  goodPlrs      = all (\p -> plrTeam p g == plrTeam clr g) plrs
+  goodCards     = all validCard cards && allSame (cardSuit <$> cards)
+  rightNumCards = length cards == numCardSuits
+
+  nonDupPlrs  = nonDup plrs
+  nonDupCards = nonDup cards
 
 main = return ()

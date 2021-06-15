@@ -1,5 +1,6 @@
 import qualified Data.Set as S
 import Data.Maybe
+import Data.List
 
 nonDup :: (Ord a) => [a] -> Bool
 nonDup l = length l == length (S.fromList l)
@@ -61,13 +62,11 @@ validMove g m = goodCardSuit && goodCard && validCheckCard && moveeExists && goo
 applyMove :: Move -> GameState -> GameState
 applyMove m g = g { gameHands = newHands, gameDran = newDran } where
   cardFound = elem (moveCard m) $ plrHand (movee m) g
-  newDran = (if cardFound then mover else movee) m
-  newHands = if cardFound then transferred else untransferred
-  untransferred = gameHands g
-  transferred   = f <$> gameHands g
+  newDran   = (if cardFound then mover else movee) m
+  newHands  = (if cardFound then id else fmap f) $ gameHands g
   f (p, h)
-    | p == mover m = (p, moveCard m : h)
-    | p == movee m = (p, filter (/= moveCard m) h)
+    | p == mover m = (p, (:)    (moveCard m) h)
+    | p == movee m = (p, delete (moveCard m) h)
     | otherwise    = (p, h)
 
 main = return ()

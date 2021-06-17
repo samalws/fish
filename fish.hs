@@ -38,16 +38,18 @@ data GameState = GameState { gamePlrs :: [(Plr, Team)], gameScores :: [(Team, In
 -- dran is German, sorta meaning "whose turn": "du bist dran" = "you are dran" = "it's your turn"
 -- I used it because there's no good English equivalent
 data ListenIOResponse = RequestPlrs | RequestScores | RequestHand | RequestDran | SubmitMove Move | SubmitCall Call
-data GameIO s = GameIO { startIO         ::                              IO ([(Plr, Team)], Plr, s),
-                         listenIO        :: s                         -> IO (Plr, ListenIOResponse),
-                         alertPlrsIO     :: s -> Plr -> [(Plr, Team)] -> IO (),
-                         alertScoresIO   :: s -> Plr -> [(Team, Int)] -> IO (),
-                         alertHandIO     :: s -> Plr -> [Card]        -> IO (),
-                         alertDranIO     :: s -> Plr -> Plr           -> IO (),
-                         alertGameOverIO :: s -> Plr                  -> IO (),
-                         alertMoveIO     :: s -> Move -> Bool         -> IO (),
-                         alertCallIO     :: s -> Call -> Bool         -> IO ()
-                       }
+data GameIO i s = GameIO {
+                           initialStartupIO ::                              IO i,
+                           startGameIO      :: i                         -> IO ([(Plr, Team)], Plr, s),
+                           listenIO         :: s                         -> IO (Plr, ListenIOResponse),
+                           alertPlrsIO      :: s -> Plr -> [(Plr, Team)] -> IO (),
+                           alertScoresIO    :: s -> Plr -> [(Team, Int)] -> IO (),
+                           alertHandIO      :: s -> Plr -> [Card]        -> IO (),
+                           alertDranIO      :: s -> Plr -> Plr           -> IO (),
+                           alertGameOverIO  :: s                         -> IO (),
+                           alertMoveIO      :: s -> Move -> Bool         -> IO (),
+                           alertCallIO      :: s -> Call -> Bool         -> IO ()
+                         }
 
 numCardNums :: Int
 numCardNums = 6
@@ -210,7 +212,7 @@ makeGame plrs dran rng = (GameState { gamePlrs = plrs, gameScores = scores, game
   (handList, rng2) = dealNPlayers (length plrs) rng
   hands = zip (fst <$> plrs) handList
 
-respondToListen :: GameIO s -> s -> GameState -> Plr -> ListenIOResponse -> IO GameState
+respondToListen :: GameIO i s -> s -> GameState -> Plr -> ListenIOResponse -> IO GameState
 respondToListen gio s game plr RequestPlrs   = (alertPlrsIO   gio s plr $ gamePlrs    game) >> pure game
 respondToListen gio s game plr RequestScores = (alertScoresIO gio s plr $ gameScores  game) >> pure game
 respondToListen gio s game plr RequestHand   = (alertHandIO   gio s plr $ plrHand plr game) >> pure game
@@ -230,7 +232,7 @@ respondToListen gio s game plr (SubmitCall call)
       alertCallIO gio s call worked
       pure newGame
 
-runIngameIOLoop :: GameIO s -> s -> GameState -> IO ()
+runIngameIOLoop :: GameIO i s -> s -> GameState -> IO ()
 runIngameIOLoop gio s game
   | gameIsFinished game = gameFinishedIO gio s game
   | otherwise = do
@@ -238,18 +240,27 @@ runIngameIOLoop gio s game
       newGame         <- respondToListen gio s game plr response
       runIngameIOLoop gio s newGame
 
-gameFinishedIO :: GameIO s -> s -> GameState -> IO ()
-gameFinishedIO gio s game = pure () -- TODO
+gameFinishedIO :: GameIO i s -> s -> GameState -> IO ()
+gameFinishedIO gio s game = do
+  sequence $ f <$> gamePlrs game -- alert scores and plrs to everyone one last time
+  alertGameOverIO gio s
+  where
+    f (plr, _) = do
+      alertPlrsIO   gio s plr $ gamePlrs   game
+      alertScoresIO gio s plr $ gameScores game
 
-runIngameIO :: GameIO s -> ([(Plr, Team)], Plr, s) -> IO ()
+runIngameIO :: GameIO i s -> ([(Plr, Team)], Plr, s) -> IO ()
 runIngameIO gio (plrs, dran, s) = do
   game <- getStdRandom $ makeGame plrs dran
   runIngameIOLoop gio s game
 
-runFullGameIO :: GameIO s -> IO ()
-runFullGameIO gio = do
-  info <- startIO gio
+runFullGameIOLoop :: GameIO i s -> i -> IO ()
+runFullGameIOLoop gio i = do
+  info <- startGameIO gio i
   forkIO $ runIngameIO gio info
-  runFullGameIO gio
+  runFullGameIOLoop gio i
+
+runFullGameIO :: GameIO i s -> IO ()
+runFullGameIO gio = initialStartupIO gio >>= runFullGameIOLoop gio
 
 main = return ()

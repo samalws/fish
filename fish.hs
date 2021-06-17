@@ -154,4 +154,13 @@ applyCall c g = g { gameScores = newScores, gameHands = newHands, gameDran = new
 gameIsFinished :: GameState -> Bool
 gameIsFinished = (== []) . mconcat . (snd <$>) . gameHands
 
+-- the one with the highest score
+gameWinner :: GameState -> Maybe Team
+gameWinner = snd . foldr f (Nothing, Nothing) . gameScores where
+  f (t, s) (Nothing, _) = (Just s, Just t)
+  f (t, s) (Just ss, tt)
+    | s > ss    = (Just  s, Just t)
+    | s < ss    = (Just ss, tt)
+    | otherwise = (Just ss, Nothing)
+
 main = return ()

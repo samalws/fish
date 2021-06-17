@@ -1,4 +1,5 @@
 import qualified Data.Set as S
+import Control.Applicative
 import Data.Maybe
 import Data.List
 
@@ -109,9 +110,9 @@ applyCall :: Call -> GameState -> GameState
 applyCall c g = g { gameScores = newScores, gameHands = newHands, gameDran = newDran } where
   newScores = modifySnd f <$> gameScores g
   newHands  = (h <$>) <$> gameHands g
-  newDran   = gameDran g -- TODO
+  newDran   = fromMaybe (gameDran g) $ i $ gameDran g : caller c : (fst <$> gamePlrs g)
 
-  correctCall = all i $ callCards c
+  correctCall = all j $ callCards c
 
   scoreToAdd = if correctCall then 1 else -1
   callTeam   = plrTeam (caller c) g
@@ -120,7 +121,14 @@ applyCall c g = g { gameScores = newScores, gameHands = newHands, gameDran = new
   f team
     | callTeam == pure team = (+) scoreToAdd
     | otherwise             = id
+
   h = filter $ (/= callSuit) . pure . cardSuit
-  i (plr, card) = card `elem` plrHand plr g
+
+  i (plr:r)
+    | lookup plr newHands /= pure [] = pure plr
+    | otherwise                      = i r
+  i [] = empty
+
+  j (plr, card) = card `elem` plrHand plr g
 
 main = return ()

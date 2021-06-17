@@ -9,6 +9,9 @@ allSame :: (Eq a) => [a] -> Bool
 allSame [] = True
 allSame (h:r) = all (== h) r
 
+modifySnd :: (a -> b -> b) -> (a, b) -> (a, b)
+modifySnd f (x,y) = (x, f x y)
+
 -- ord derivations are so they can be put into sets
 data Card = Card { cardNum :: Int, cardSuit :: Int }              deriving (Show, Eq, Ord)
 data Plr  = Plr  { plrNum :: Int }                                deriving (Show, Eq, Ord)
@@ -74,15 +77,16 @@ validMove g m = validCheckCard && cardSuitInHand && cardNotInHand && moveeExists
   moverDran      = mver == gameDran g
 
 -- property that must hold: if validGameState g and validMove g m, then validGameState (applyMove m g)
+-- applyMove m g is undefined if not (validGameState g and validMove g m)
 applyMove :: Move -> GameState -> GameState
 applyMove m g = g { gameHands = newHands, gameDran = newDran } where
   cardFound = moveCard m `elem` plrHand (movee m) g
   newDran   = (if cardFound then mover else movee) m
-  newHands  = (if cardFound then id else fmap f) $ gameHands g
-  f (p, h)
-    | p == mover m = (p, (:)    (moveCard m) h)
-    | p == movee m = (p, delete (moveCard m) h)
-    | otherwise    = (p, h)
+  newHands  = (if cardFound then id else modifySnd f) <$> gameHands g
+  f plr
+    | plr == mover m = (:)    (moveCard m)
+    | plr == movee m = delete (moveCard m)
+    | otherwise      = id
 
 validCall :: GameState -> Call -> Bool
 validCall g c = goodCaller && goodPlrs && goodCards && rightNumCards && nonDupPlrs && nonDupCards where
@@ -98,5 +102,25 @@ validCall g c = goodCaller && goodPlrs && goodCards && rightNumCards && nonDupPl
 
   nonDupPlrs  = nonDup plrs
   nonDupCards = nonDup cards
+
+-- property that must hold: if validGameState g and validCall g c, then validGameState (applyCall c g)
+-- applyCall c g is undefined if not (validGameState g and validCall g c)
+applyCall :: Call -> GameState -> GameState
+applyCall c g = g { gameScores = newScores, gameHands = newHands, gameDran = newDran } where
+  newScores = modifySnd f <$> gameScores g
+  newHands  = (h <$>) <$> gameHands g
+  newDran   = gameDran g -- TODO
+
+  correctCall = all i $ callCards c
+
+  scoreToAdd = if correctCall then 1 else -1
+  callTeam   = plrTeam (caller c) g
+  callSuit   = listToMaybe $ (cardSuit . snd) <$> callCards c
+
+  f team
+    | callTeam == pure team = (+) scoreToAdd
+    | otherwise             = id
+  h = filter $ (/= callSuit) . pure . cardSuit
+  i (plr, card) = card `elem` plrHand plr g
 
 main = return ()

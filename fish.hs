@@ -13,13 +13,26 @@ allSame (h:r) = all (== h) r
 modifySnd :: (a -> b -> b) -> (a, b) -> (a, b)
 modifySnd f (x,y) = (x, f x y)
 
--- ord derivations are so they can be put into sets
+-- rotate l until x is first
+rotateMakingFirst :: (Eq a) => a -> [a] -> [a]
+rotateMakingFirst x l
+  | x `elem` l = helper l
+  | otherwise  = l -- error condition: x is not in l, so we don't rotate
+  where
+    helper [] = []
+    helper (h:r)
+      | h == x = (h:r)
+      | otherwise = helper (r ++ [h])
+
+-- Ord derivations are so they can be put into sets
 data Card = Card { cardNum :: Int, cardSuit :: Int }              deriving (Show, Eq, Ord)
 data Plr  = Plr  { plrNum :: Int }                                deriving (Show, Eq, Ord)
 data Team = Team { teamNum :: Int }                               deriving (Show, Eq, Ord)
 data Move = Move { moveCard :: Card, mover :: Plr, movee :: Plr } deriving (Show, Eq)
 data Call = Call { callCards :: [(Plr, Card)],  caller :: Plr } deriving (Show, Eq)
 data GameState = GameState { gamePlrs :: [(Plr, Team)], gameScores :: [(Team, Int)], gameHands :: [(Plr, [Card])], gameDran :: Plr } deriving (Eq, Show)
+-- dran is German, sorta meaning "whose turn": "du bist dran" = "you are dran" = "it's your turn"
+-- I used it because there's no good English equivalent
 
 numCardNums :: Int
 numCardNums = 6
@@ -108,15 +121,21 @@ validCall g c = goodCaller && goodPlrs && goodCards && rightNumCards && nonDupPl
 -- applyCall c g is undefined if not (validGameState g and validCall g c)
 applyCall :: Call -> GameState -> GameState
 applyCall c g = g { gameScores = newScores, gameHands = newHands, gameDran = newDran } where
-  newScores = modifySnd f <$> gameScores g
-  newHands  = (h <$>) <$> gameHands g
-  newDran   = fromMaybe (gameDran g) $ i $ gameDran g : caller c : (fst <$> gamePlrs g)
+
+  -- add or subtract 1 from the caller's team's score
+  newScores   = modifySnd f <$> gameScores g
+
+  -- remove cards of the called suit from all hands
+  newHands    = (h <$>) <$> gameHands g
+
+  -- look for the first player whose hand isn't empty, starting at current dran, and then continuing rightward along the player list
+  newDran     = fromMaybe (gameDran g) $ i $ rotateMakingFirst (gameDran g) $ fst <$> gamePlrs g
 
   correctCall = all j $ callCards c
 
-  scoreToAdd = if correctCall then 1 else -1
-  callTeam   = plrTeam (caller c) g
-  callSuit   = listToMaybe $ (cardSuit . snd) <$> callCards c
+  scoreToAdd  = if correctCall then 1 else -1
+  callTeam    = plrTeam (caller c) g
+  callSuit    = listToMaybe $ (cardSuit . snd) <$> callCards c
 
   f team
     | callTeam == pure team = (+) scoreToAdd
@@ -130,5 +149,9 @@ applyCall c g = g { gameScores = newScores, gameHands = newHands, gameDran = new
   i [] = empty
 
   j (plr, card) = card `elem` plrHand plr g
+
+-- game is finished if everyone's hands are empty
+gameIsFinished :: GameState -> Bool
+gameIsFinished = (== []) . mconcat . (snd <$>) . gameHands
 
 main = return ()

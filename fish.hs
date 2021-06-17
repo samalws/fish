@@ -5,6 +5,7 @@ import Control.Applicative
 import Data.Maybe
 import Data.List
 import System.Random
+import Control.Concurrent
 
 nonDup :: (Ord a) => [a] -> Bool
 nonDup l = length l == length (S.fromList l)
@@ -36,6 +37,17 @@ data Call = Call { callCards :: [(Plr, Card)],  caller :: Plr } deriving (Show, 
 data GameState = GameState { gamePlrs :: [(Plr, Team)], gameScores :: [(Team, Int)], gameHands :: [(Plr, [Card])], gameDran :: Plr } deriving (Eq, Show)
 -- dran is German, sorta meaning "whose turn": "du bist dran" = "you are dran" = "it's your turn"
 -- I used it because there's no good English equivalent
+data ListenIOResponse = RequestPlrs | RequestScores | RequestHand | RequestDran | SubmitMove Move | SubmitCall Call
+data GameIO s = GameIO { startIO         ::                              IO ([(Plr, Team)], Plr, s),
+                         listenIO        :: s                         -> IO (Plr, ListenIOResponse),
+                         alertPlrsIO     :: s -> Plr -> [(Plr, Team)] -> IO (),
+                         alertScoresIO   :: s -> Plr -> [(Team, Int)] -> IO (),
+                         alertHandIO     :: s -> Plr -> [Card]        -> IO (),
+                         alertDranIO     :: s -> Plr -> Plr           -> IO (),
+                         alertGameOverIO :: s -> Plr                  -> IO (),
+                         alertMoveIO     :: s -> Move -> Bool         -> IO (),
+                         alertCallIO     :: s -> Call -> Bool         -> IO ()
+                       }
 
 numCardNums :: Int
 numCardNums = 6
@@ -93,11 +105,14 @@ validMove g m = validCheckCard && cardSuitInHand && cardNotInHand && moveeExists
   moveeNonempty  = plrHand mvee g /= []
   moverDran      = mver == gameDran g
 
+moveWorks :: Move -> GameState -> Bool
+moveWorks m g = moveCard m `elem` plrHand (movee m) g
+
 -- property that must hold: if validGameState g and validMove g m, then validGameState (applyMove m g)
 -- applyMove m g is undefined if not (validGameState g and validMove g m)
 applyMove :: Move -> GameState -> GameState
 applyMove m g = g { gameHands = newHands, gameDran = newDran } where
-  cardFound = moveCard m `elem` plrHand (movee m) g
+  cardFound = moveWorks m g
   newDran   = (if cardFound then mover else movee) m
   newHands  = (if cardFound then id else modifySnd f) <$> gameHands g
   f plr
@@ -120,6 +135,10 @@ validCall g c = goodCaller && goodPlrs && goodCards && rightNumCards && nonDupPl
   nonDupPlrs  = nonDup plrs
   nonDupCards = nonDup cards
 
+callWorks :: Call -> GameState -> Bool
+callWorks c g = all f $ callCards c where
+  f (plr, card) = card `elem` plrHand plr g
+
 -- property that must hold: if validGameState g and validCall g c, then validGameState (applyCall c g)
 -- applyCall c g is undefined if not (validGameState g and validCall g c)
 applyCall :: Call -> GameState -> GameState
@@ -134,8 +153,7 @@ applyCall c g = g { gameScores = newScores, gameHands = newHands, gameDran = new
   -- look for the first player whose hand isn't empty, starting at current dran, and then continuing rightward along the player list
   newDran     = fromMaybe (gameDran g) $ i $ rotateMakingFirst (gameDran g) $ fst <$> gamePlrs g
 
-  correctCall = all j $ callCards c
-
+  correctCall = callWorks c g
   scoreToAdd  = if correctCall then 1 else -1
   callTeam    = plrTeam (caller c) g
   callSuit    = listToMaybe $ (cardSuit . snd) <$> callCards c
@@ -150,8 +168,6 @@ applyCall c g = g { gameScores = newScores, gameHands = newHands, gameDran = new
     | lookup plr newHands /= pure [] = pure plr
     | otherwise                      = i r
   i [] = empty
-
-  j (plr, card) = card `elem` plrHand plr g
 
 -- game is finished if everyone's hands are empty
 gameIsFinished :: GameState -> Bool
@@ -193,5 +209,47 @@ makeGame plrs dran rng = (GameState { gamePlrs = plrs, gameScores = scores, game
   scores = (, 0) <$> teamList
   (handList, rng2) = dealNPlayers (length plrs) rng
   hands = zip (fst <$> plrs) handList
+
+respondToListen :: GameIO s -> s -> GameState -> Plr -> ListenIOResponse -> IO GameState
+respondToListen gio s game plr RequestPlrs   = (alertPlrsIO   gio s plr $ gamePlrs    game) >> pure game
+respondToListen gio s game plr RequestScores = (alertScoresIO gio s plr $ gameScores  game) >> pure game
+respondToListen gio s game plr RequestHand   = (alertHandIO   gio s plr $ plrHand plr game) >> pure game
+respondToListen gio s game plr RequestDran   = (alertDranIO   gio s plr $ gameDran    game) >> pure game
+respondToListen gio s game plr (SubmitMove move)
+  | not (validMove game move) = pure game
+  | otherwise = do
+      let newGame = applyMove move game
+      let worked  = moveWorks move game
+      alertMoveIO gio s move worked
+      pure newGame
+respondToListen gio s game plr (SubmitCall call)
+  | not (validCall game call) = pure game
+  | otherwise = do
+      let newGame = applyCall call game
+      let worked  = callWorks call game
+      alertCallIO gio s call worked
+      pure newGame
+
+runIngameIOLoop :: GameIO s -> s -> GameState -> IO ()
+runIngameIOLoop gio s game
+  | gameIsFinished game = gameFinishedIO gio s game
+  | otherwise = do
+      (plr, response) <- listenIO gio s
+      newGame         <- respondToListen gio s game plr response
+      runIngameIOLoop gio s newGame
+
+gameFinishedIO :: GameIO s -> s -> GameState -> IO ()
+gameFinishedIO gio s game = pure () -- TODO
+
+runIngameIO :: GameIO s -> ([(Plr, Team)], Plr, s) -> IO ()
+runIngameIO gio (plrs, dran, s) = do
+  game <- getStdRandom $ makeGame plrs dran
+  runIngameIOLoop gio s game
+
+runFullGameIO :: GameIO s -> IO ()
+runFullGameIO gio = do
+  info <- startIO gio
+  forkIO $ runIngameIO gio info
+  runFullGameIO gio
 
 main = return ()

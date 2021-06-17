@@ -1,7 +1,10 @@
+{-# LANGUAGE TupleSections #-}
+
 import qualified Data.Set as S
 import Control.Applicative
 import Data.Maybe
 import Data.List
+import System.Random
 
 nonDup :: (Ord a) => [a] -> Bool
 nonDup l = length l == length (S.fromList l)
@@ -162,5 +165,33 @@ gameWinner = snd . foldr f (Nothing, Nothing) . gameScores where
     | s > ss    = (Just  s, Just t)
     | s < ss    = (Just ss, tt)
     | otherwise = (Just ss, Nothing)
+
+shuffleDeck :: (RandomGen g) => [Card] -> g -> ([Card], g)
+shuffleDeck [] rng = ([], rng)
+shuffleDeck d  rng = (newD, rng3) where
+  (chosenNum, rng2) = randomR (0, length d - 1) rng
+  chosenElem = d !! chosenNum
+  elemRemoved = take (chosenNum - 1) d ++ drop chosenNum d
+  (restShuffled, rng3) = shuffleDeck elemRemoved rng2
+  newD = chosenElem : restShuffled
+
+makeNHands :: [Card] -> Int -> [[Card]]
+makeNHands _ 0 = []
+makeNHands d 1 = [d]
+makeNHands d n = take m d : makeNHands (drop m d) (n-1) where m = length d `div` n
+
+makeNRandomHands :: (RandomGen g) => [Card] -> Int -> g -> ([[Card]], g)
+makeNRandomHands d n rng = (makeNHands d2 n, rng2) where (d2, rng2) = shuffleDeck d rng
+
+dealNPlayers :: (RandomGen g) => Int -> g -> ([[Card]], g)
+dealNPlayers = makeNRandomHands fullDeck
+
+-- property that must hold: if (fst <$> plrs) contains no duplicates and (dran `elem` plrs), then validGameState (fst (makeGame plrs dran rng))
+makeGame :: (RandomGen g) => [(Plr, Team)] -> Plr -> g -> (GameState, g)
+makeGame plrs dran rng = (GameState { gamePlrs = plrs, gameScores = scores, gameHands = hands, gameDran = dran }, rng2) where
+  teamList = S.toList $ S.fromList $ snd <$> plrs
+  scores = (, 0) <$> teamList
+  (handList, rng2) = dealNPlayers (length plrs) rng
+  hands = zip (fst <$> plrs) handList
 
 main = return ()
